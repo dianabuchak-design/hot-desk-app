@@ -379,6 +379,26 @@
         <span style="display:flex;align-items:center;gap:6px;font-size:12px;color:#7a909e;"><span style="width:12px;height:12px;background:#ef4444;border-radius:50%;display:inline-block;"></span> Booked</span>
         <span id="desk-count-label" style="font-size:12px;color:#7a909e;"></span>
       </div>
+      <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-top:1px solid #e8eef2;padding-top:14px;">
+        <button class="toolbar-btn active" onclick="saveMap()" style="background:#2a9d8f;color:#fff;border-color:#2a9d8f;">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          Save Map
+        </button>
+        <button class="toolbar-btn danger" onclick="deleteMap()">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+          Delete Map
+        </button>
+        <span style="width:1px;height:24px;background:#e8eef2;display:inline-block;"></span>
+        <button class="toolbar-btn active" onclick="saveDesks()" style="background:#2a9d8f;color:#fff;border-color:#2a9d8f;">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 8 12 12 14 14"/></svg>
+          Save Desks
+        </button>
+        <button class="toolbar-btn danger" onclick="deleteDesks()">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+          Delete Desks
+        </button>
+        <span id="map-save-status" style="font-size:12px;color:#16a34a;"></span>
+      </div>
     </div>
 
     <!-- ALL RESERVATIONS PAGE -->
@@ -807,6 +827,47 @@ function renderSettingsPage() {
   if (s) s.textContent = mapImageSrc ? '✓ Map image is loaded.' : 'No map uploaded yet.';
 }
 
+// ========== MAP & DESK SAVE/DELETE (localStorage only) ==========
+function saveMap() {
+  localStorage.setItem('hd_map_img', mapImageSrc);
+  localStorage.setItem('hd_desks', JSON.stringify(desks));
+  showMapStatus('✓ Map and desks saved.');
+}
+
+function deleteMap() {
+  if (!confirm('Delete the saved map image? This cannot be undone.')) return;
+  mapImageSrc = '';
+  localStorage.removeItem('hd_map_img');
+  const img = document.getElementById('office-map');
+  img.src = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="920"><rect width="1160" height="920" fill="#b8cfc4"/><text x="580" y="450" text-anchor="middle" font-family="sans-serif" font-size="24" fill="#6a8c7e">No map uploaded.</text><text x="580" y="490" text-anchor="middle" font-family="sans-serif" font-size="16" fill="#6a8c7e">Go to Settings (Admin) to upload the office map.</text></svg>');
+  renderDesks();
+  renderSettingsPage();
+  showMapStatus('Map deleted.', '#ef4444');
+}
+
+function saveDesks() {
+  localStorage.setItem('hd_desks', JSON.stringify(desks));
+  showMapStatus('✓ Desks saved (' + desks.length + ' desks).');
+}
+
+function deleteDesks() {
+  if (!confirm('Delete ALL hot desks from the map?')) return;
+  desks = [];
+  localStorage.setItem('hd_desks', JSON.stringify(desks));
+  renderDesks();
+  renderSettingsPage();
+  showMapStatus('All desks deleted.', '#ef4444');
+}
+
+function showMapStatus(msg, color) {
+  const el = document.getElementById('map-save-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = color || '#16a34a';
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.textContent = ''; }, 3000);
+}
+
 function goToEditMode() {
   navigate('map');
   setTimeout(() => setMode('edit'), 100);
@@ -814,7 +875,7 @@ function goToEditMode() {
 
 function deleteAllDesks() {
   if (!confirm('Delete ALL desks from the map?')) return;
-  desks = []; saveDesks(); renderDesks(); renderSettingsPage();
+  desks = []; localStorage.setItem('hd_desks', JSON.stringify(desks)); renderDesks(); renderSettingsPage();
 }
 
 function clearAllBookings() {
@@ -850,7 +911,7 @@ function handleMapClick(e) {
   const x = ((e.clientX - rect.left) / img.offsetWidth) * 100;
   const y = ((e.clientY - rect.top) / img.offsetHeight) * 100;
   desks.push({ id: Date.now(), x, y, label: 'Desk ' + (desks.length + 1) });
-  saveDesks(); renderDesks();
+  _persistDesks(); renderDesks();
 }
 
 // ========== RENDER DESKS ==========
@@ -878,7 +939,7 @@ function renderDesks() {
     if (mode === 'edit') {
       const del = document.createElement('button');
       del.className = 'del-btn'; del.innerHTML = '✕';
-      del.onclick = (e) => { e.stopPropagation(); desks = desks.filter(d => d.id !== desk.id); saveDesks(); renderDesks(); };
+      del.onclick = (e) => { e.stopPropagation(); desks = desks.filter(d => d.id !== desk.id); _persistDesks(); renderDesks(); };
       dot.appendChild(del);
     } else {
       dot.onclick = (e) => { e.stopPropagation(); openBookingModal(desk); };
@@ -1084,7 +1145,7 @@ function exportBookings() {
 }
 
 // ========== SAVE ==========
-function saveDesks() { localStorage.setItem('hd_desks', JSON.stringify(desks)); }
+function _persistDesks() { localStorage.setItem('hd_desks', JSON.stringify(desks)); }
 function saveBookings() { localStorage.setItem('hd_bookings', JSON.stringify(bookings)); }
 
 // ========== INIT ==========
