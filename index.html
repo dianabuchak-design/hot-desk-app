@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Hot Desk Booking</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #ffffff; display: flex; height: 100vh; overflow: hidden; }
@@ -226,6 +227,13 @@
   /* PASSWORD MODAL */
   .lock-icon { font-size: 32px; text-align: center; margin-bottom: 12px; }
   .pwd-subtitle { font-size: 13px; color: #7a909e; margin-bottom: 20px; text-align: center; }
+
+  /* SUPABASE CONFIG MODAL */
+  .supabase-config-banner {
+    background: #fff8e6; border: 1px solid #f6d860; border-radius: 8px;
+    padding: 10px 14px; font-size: 12px; color: #92650a; margin-bottom: 14px;
+    display: flex; align-items: center; gap: 8px;
+  }
 </style>
 </head>
 <body>
@@ -280,9 +288,9 @@
       <span class="nav-label">Settings</span>
     </div>
     <div class="sidebar-user">
-      <div class="user-avatar">DB</div>
+      <div class="user-avatar">G</div>
       <div class="user-info">
-        <div class="user-name">Diana Buchak</div>
+        <div class="user-name">GENESIS</div>
         <div class="user-sub">Head Office · Genesis Media Limited</div>
       </div>
     </div>
@@ -481,6 +489,33 @@
     <div class="page" id="page-settings">
       <h2 style="font-size:22px;font-weight:700;color:#1a2e3b;margin-bottom:20px;">Settings (Admin)</h2>
       <div class="settings-section">
+        <h3>Supabase Connection</h3>
+        <div class="settings-row">
+          <div>
+            <div class="settings-label">Supabase URL</div>
+            <div class="settings-desc">Your project URL from Supabase dashboard (Settings → API).</div>
+          </div>
+          <input type="text" id="sb-url-input" placeholder="https://xxxx.supabase.co" style="width:300px;padding:8px 10px;border:1.5px solid #c5d5e0;border-radius:7px;font-size:13px;">
+        </div>
+        <div class="settings-row">
+          <div>
+            <div class="settings-label">Supabase Anon Key</div>
+            <div class="settings-desc">Public anon key from Supabase dashboard (Settings → API).</div>
+          </div>
+          <input type="text" id="sb-key-input" placeholder="eyJhbGci..." style="width:300px;padding:8px 10px;border:1.5px solid #c5d5e0;border-radius:7px;font-size:13px;">
+        </div>
+        <div class="settings-row">
+          <div>
+            <div class="settings-label">Connection Status</div>
+            <div class="settings-desc" id="sb-status-desc">Not configured.</div>
+          </div>
+          <button class="toolbar-btn" onclick="saveSupabaseConfig()">Save &amp; Connect</button>
+        </div>
+        <div id="sb-setup-hint" style="margin-top:12px;font-size:12px;color:#7a909e;line-height:1.6;">
+          <strong>Setup required:</strong> Create a table called <code>app_state</code> in your Supabase project with columns: <code>key</code> (text, primary key), <code>value</code> (text). Enable Row Level Security and add a policy allowing all operations for anon role.
+        </div>
+      </div>
+      <div class="settings-section">
         <h3>Office Map</h3>
         <div class="settings-row">
           <div>
@@ -633,13 +668,98 @@
 <script>
 // ========== CONSTANTS ==========
 const ADMIN_PASSWORD = 'GENESIS2026TECH!1';
+const PLACEHOLDER_MAP = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="920"><rect width="1160" height="920" fill="#b8cfc4"/><text x="580" y="450" text-anchor="middle" font-family="sans-serif" font-size="24" fill="#6a8c7e">No map uploaded.</text><text x="580" y="490" text-anchor="middle" font-family="sans-serif" font-size="16" fill="#6a8c7e">Go to Settings (Admin) to upload the office map.</text></svg>');
+
+// ========== SUPABASE ==========
+let _supabase = null;
+
+function getSupabaseConfig() {
+  return {
+    url: localStorage.getItem('sb_url') || '',
+    key: localStorage.getItem('sb_key') || ''
+  };
+}
+
+function initSupabase(url, key) {
+  if (!url || !key) return false;
+  try {
+    _supabase = supabase.createClient(url, key);
+    return true;
+  } catch(e) {
+    _supabase = null;
+    return false;
+  }
+}
+
+function saveSupabaseConfig() {
+  const url = document.getElementById('sb-url-input').value.trim();
+  const key = document.getElementById('sb-key-input').value.trim();
+  if (!url || !key) { updateSbStatus('Please enter both URL and key.', '#ef4444'); return; }
+  localStorage.setItem('sb_url', url);
+  localStorage.setItem('sb_key', key);
+  const ok = initSupabase(url, key);
+  if (ok) {
+    updateSbStatus('Connected. Testing...', '#f6a800');
+    testSupabaseConnection();
+  } else {
+    updateSbStatus('Failed to initialize client.', '#ef4444');
+  }
+}
+
+async function testSupabaseConnection() {
+  if (!_supabase) { updateSbStatus('Not connected.', '#ef4444'); return; }
+  try {
+    const { error } = await _supabase.from('app_state').select('key').limit(1);
+    if (error) {
+      updateSbStatus('Error: ' + error.message, '#ef4444');
+    } else {
+      updateSbStatus('✓ Connected and table found.', '#16a34a');
+    }
+  } catch(e) {
+    updateSbStatus('Connection error: ' + e.message, '#ef4444');
+  }
+}
+
+function updateSbStatus(msg, color) {
+  const el = document.getElementById('sb-status-desc');
+  if (el) { el.textContent = msg; el.style.color = color || '#7a909e'; }
+}
+
+// ========== SHARED STATE: SUPABASE + localStorage FALLBACK ==========
+async function sharedGet(key) {
+  if (_supabase) {
+    try {
+      const { data, error } = await _supabase.from('app_state').select('value').eq('key', key).maybeSingle();
+      if (!error && data) return data.value;
+    } catch(e) {}
+  }
+  return localStorage.getItem('hd_' + key);
+}
+
+async function sharedSet(key, value) {
+  localStorage.setItem('hd_' + key, value);
+  if (_supabase) {
+    try {
+      await _supabase.from('app_state').upsert({ key, value }, { onConflict: 'key' });
+    } catch(e) {}
+  }
+}
+
+async function sharedDelete(key) {
+  localStorage.removeItem('hd_' + key);
+  if (_supabase) {
+    try {
+      await _supabase.from('app_state').delete().eq('key', key);
+    } catch(e) {}
+  }
+}
 
 // ========== STATE ==========
 let mode = 'book';
 let selectedDeskId = null;
-let desks = JSON.parse(localStorage.getItem('hd_desks') || '[]');
-let bookings = JSON.parse(localStorage.getItem('hd_bookings') || '[]');
-let mapImageSrc = localStorage.getItem('hd_map_img') || '';
+let desks = [];
+let bookings = [];
+let mapImageSrc = '';
 let adminUnlocked = false;
 let pendingNavPage = null;
 let pendingCancelId = null;
@@ -658,16 +778,34 @@ function drawLogo() {
 }
 drawLogo();
 
-// ========== MAP INIT ==========
-(function loadMap() {
-  const img = document.getElementById('office-map');
-  if (mapImageSrc) {
+// ========== LOAD ON INIT ==========
+async function loadSharedState() {
+  const [mapVal, desksVal, bookingsVal] = await Promise.all([
+    sharedGet('map_img'),
+    sharedGet('desks'),
+    sharedGet('bookings')
+  ]);
+
+  if (mapVal) {
+    mapImageSrc = mapVal;
+    const img = document.getElementById('office-map');
     img.src = mapImageSrc;
-    img.onload = renderDesks;
+    await new Promise(res => { img.onload = res; img.onerror = res; });
   } else {
-    img.src = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="920"><rect width="1160" height="920" fill="#b8cfc4"/><text x="580" y="450" text-anchor="middle" font-family="sans-serif" font-size="24" fill="#6a8c7e">No map uploaded.</text><text x="580" y="490" text-anchor="middle" font-family="sans-serif" font-size="16" fill="#6a8c7e">Go to Settings (Admin) to upload the office map.</text></svg>');
-    img.onload = renderDesks;
+    document.getElementById('office-map').src = PLACEHOLDER_MAP;
   }
+
+  desks = desksVal ? JSON.parse(desksVal) : [];
+  bookings = bookingsVal ? JSON.parse(bookingsVal) : [];
+
+  renderDesks();
+  renderWeekDays();
+  renderUpcoming();
+}
+
+// ========== MAP INIT ==========
+(function initMapPlaceholder() {
+  document.getElementById('office-map').src = PLACEHOLDER_MAP;
 })();
 
 // ========== PASSWORD LOGIC ==========
@@ -715,13 +853,13 @@ function closeCancelPwdModal() {
   pendingCancelId = null;
 }
 
-function submitCancelPwd() {
+async function submitCancelPwd() {
   const val = document.getElementById('cancel-pwd-input').value;
   if (val === ADMIN_PASSWORD) {
     document.getElementById('cancel-pwd-modal').classList.remove('open');
     const id = pendingCancelId; pendingCancelId = null;
     bookings = bookings.filter(b => b.id !== id);
-    saveBookings();
+    await saveBookings();
     closeModal();
     renderDesks();
     renderAllReservations();
@@ -800,18 +938,18 @@ function renderUpcoming() {
 }
 
 // ========== MAP UPLOAD ==========
-function setMapImage(src) {
+async function setMapImage(src) {
   mapImageSrc = src;
-  localStorage.setItem('hd_map_img', src);
   document.getElementById('office-map').src = src;
+  await sharedSet('map_img', src);
 }
 
 function handleMapUpload(e) {
   const file = e.target.files[0];
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = (ev) => {
-    setMapImage(ev.target.result);
+  reader.onload = async (ev) => {
+    await setMapImage(ev.target.result);
     const s = document.getElementById('map-status');
     if (s) s.textContent = '✓ Map uploaded: ' + file.name;
     setTimeout(renderDesks, 200);
@@ -825,35 +963,46 @@ function renderSettingsPage() {
   if (cnt) cnt.textContent = desks.length;
   const s = document.getElementById('map-status');
   if (s) s.textContent = mapImageSrc ? '✓ Map image is loaded.' : 'No map uploaded yet.';
+  const cfg = getSupabaseConfig();
+  const urlEl = document.getElementById('sb-url-input');
+  const keyEl = document.getElementById('sb-key-input');
+  if (urlEl && cfg.url) urlEl.value = cfg.url;
+  if (keyEl && cfg.key) keyEl.value = cfg.key;
+  if (_supabase) {
+    updateSbStatus('✓ Connected.', '#16a34a');
+  } else if (cfg.url && cfg.key) {
+    updateSbStatus('Configured but not yet connected.', '#f6a800');
+  } else {
+    updateSbStatus('Not configured.', '#7a909e');
+  }
 }
 
-// ========== MAP & DESK SAVE/DELETE (localStorage only) ==========
-function saveMap() {
-  localStorage.setItem('hd_map_img', mapImageSrc);
-  localStorage.setItem('hd_desks', JSON.stringify(desks));
+// ========== MAP & DESK SAVE/DELETE ==========
+async function saveMap() {
+  await sharedSet('map_img', mapImageSrc);
+  await sharedSet('desks', JSON.stringify(desks));
   showMapStatus('✓ Map and desks saved.');
 }
 
-function deleteMap() {
+async function deleteMap() {
   if (!confirm('Delete the saved map image? This cannot be undone.')) return;
   mapImageSrc = '';
-  localStorage.removeItem('hd_map_img');
-  const img = document.getElementById('office-map');
-  img.src = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="920"><rect width="1160" height="920" fill="#b8cfc4"/><text x="580" y="450" text-anchor="middle" font-family="sans-serif" font-size="24" fill="#6a8c7e">No map uploaded.</text><text x="580" y="490" text-anchor="middle" font-family="sans-serif" font-size="16" fill="#6a8c7e">Go to Settings (Admin) to upload the office map.</text></svg>');
+  await sharedDelete('map_img');
+  document.getElementById('office-map').src = PLACEHOLDER_MAP;
   renderDesks();
   renderSettingsPage();
   showMapStatus('Map deleted.', '#ef4444');
 }
 
-function saveDesks() {
-  localStorage.setItem('hd_desks', JSON.stringify(desks));
+async function saveDesks() {
+  await sharedSet('desks', JSON.stringify(desks));
   showMapStatus('✓ Desks saved (' + desks.length + ' desks).');
 }
 
-function deleteDesks() {
+async function deleteDesks() {
   if (!confirm('Delete ALL hot desks from the map?')) return;
   desks = [];
-  localStorage.setItem('hd_desks', JSON.stringify(desks));
+  await sharedSet('desks', JSON.stringify(desks));
   renderDesks();
   renderSettingsPage();
   showMapStatus('All desks deleted.', '#ef4444');
@@ -873,14 +1022,20 @@ function goToEditMode() {
   setTimeout(() => setMode('edit'), 100);
 }
 
-function deleteAllDesks() {
+async function deleteAllDesks() {
   if (!confirm('Delete ALL desks from the map?')) return;
-  desks = []; localStorage.setItem('hd_desks', JSON.stringify(desks)); renderDesks(); renderSettingsPage();
+  desks = [];
+  await sharedSet('desks', JSON.stringify(desks));
+  renderDesks();
+  renderSettingsPage();
 }
 
-function clearAllBookings() {
+async function clearAllBookings() {
   if (!confirm('Delete ALL bookings? This cannot be undone.')) return;
-  bookings = []; saveBookings(); renderWeekDays(); renderUpcoming();
+  bookings = [];
+  await saveBookings();
+  renderWeekDays();
+  renderUpcoming();
 }
 
 // ========== MODE ==========
@@ -993,7 +1148,7 @@ function closeModal() {
   selectedDeskId = null;
 }
 
-function submitBooking() {
+async function submitBooking() {
   const first = document.getElementById('f-first').value.trim();
   const last = document.getElementById('f-last').value.trim();
   const email = document.getElementById('f-email').value.trim();
@@ -1013,7 +1168,7 @@ function submitBooking() {
   }
 
   bookings.push({ id: Date.now(), deskId: selectedDeskId, firstName: first, lastName: last, email, project, date });
-  saveBookings();
+  await saveBookings();
   okEl.textContent = '✓ Desk booked successfully!'; okEl.style.display = 'block';
   setTimeout(() => { closeModal(); renderDesks(); renderWeekDays(); renderUpcoming(); }, 1000);
 }
@@ -1144,18 +1299,28 @@ function exportBookings() {
   XLSX.writeFile(wb, 'hot-desk-bookings.xlsx');
 }
 
-// ========== SAVE ==========
-function _persistDesks() { localStorage.setItem('hd_desks', JSON.stringify(desks)); }
-function saveBookings() { localStorage.setItem('hd_bookings', JSON.stringify(bookings)); }
+// ========== PERSIST ==========
+async function _persistDesks() {
+  await sharedSet('desks', JSON.stringify(desks));
+}
+async function saveBookings() {
+  await sharedSet('bookings', JSON.stringify(bookings));
+}
 
 // ========== INIT ==========
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   const today = new Date().toISOString().split('T')[0];
   const df = document.getElementById('map-date-filter');
   if (df) df.value = today;
+
+  // init supabase if configured
+  const cfg = getSupabaseConfig();
+  if (cfg.url && cfg.key) {
+    initSupabase(cfg.url, cfg.key);
+  }
+
+  await loadSharedState();
   setMode('book');
-  renderWeekDays();
-  renderUpcoming();
 });
 
 document.getElementById('booking-modal').addEventListener('click', function(e) { if (e.target === this) closeModal(); });
