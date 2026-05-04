@@ -694,6 +694,12 @@ function initSupabase(url, key) {
   }
 }
 
+// Initialize immediately at script parse time — before DOMContentLoaded — so _supabase is ready
+(function earlyInitSupabase() {
+  const cfg = getSupabaseConfig();
+  if (cfg.url && cfg.key) initSupabase(cfg.url, cfg.key);
+})();
+
 function saveSupabaseConfig() {
   const url = document.getElementById('sb-url-input').value.trim();
   const key = document.getElementById('sb-key-input').value.trim();
@@ -704,6 +710,7 @@ function saveSupabaseConfig() {
   if (ok) {
     updateSbStatus('Connected. Testing...', '#f6a800');
     testSupabaseConnection();
+    loadAppState();
   } else {
     updateSbStatus('Failed to initialize client.', '#ef4444');
   }
@@ -799,35 +806,61 @@ function drawLogo() {
 }
 drawLogo();
 
-// ========== LOAD ON INIT ==========
-async function loadSharedState() {
+// ========== RENDER MAP ==========
+function renderMap(mapSrc) {
   const img = document.getElementById('office-map');
+  if (mapSrc) {
+    mapImageSrc = mapSrc;
+    img.src = mapSrc;
+  } else {
+    mapImageSrc = '';
+    img.src = PLACEHOLDER_MAP;
+  }
+}
 
-  const row = await sbLoadState();
+// ========== LOAD ON INIT ==========
+async function loadAppState() {
+  if (!_supabase) {
+    // No Supabase configured — show placeholder
+    document.getElementById('office-map').src = PLACEHOLDER_MAP;
+    renderDesks();
+    renderWeekDays();
+    renderUpcoming();
+    return;
+  }
 
-  if (row) {
-    // Load map
-    if (row.map) {
-      mapImageSrc = row.map;
-      img.src = mapImageSrc;
-      await new Promise(res => { img.onload = res; img.onerror = res; });
+  try {
+    const { data, error } = await _supabase
+      .from('app_state')
+      .select('*')
+      .eq('id', APP_STATE_ID)
+      .eq('key', APP_STATE_KEY)
+      .single();
+
+    if (error) {
+      // PGRST116 = no rows found — treat as empty state
+      if (error.code === 'PGRST116') {
+        renderMap(null);
+        desks = [];
+      } else {
+        console.error('loadAppState error:', error);
+        renderMap(null);
+        desks = [];
+      }
+    } else if (data) {
+      renderMap(data.map || null);
+      const rawDesks = data.desks;
+      desks = rawDesks
+        ? (Array.isArray(rawDesks) ? rawDesks : JSON.parse(rawDesks))
+        : [];
     } else {
-      mapImageSrc = '';
-      img.src = PLACEHOLDER_MAP;
-    }
-    // Load desks — desks column is jsonb, may already be parsed
-    if (row.desks) {
-      desks = Array.isArray(row.desks) ? row.desks : JSON.parse(row.desks);
-    } else {
+      renderMap(null);
       desks = [];
     }
-  } else {
-    // No record yet — show placeholder, empty desks
-    mapImageSrc = '';
+  } catch(e) {
+    console.error('loadAppState exception:', e);
+    renderMap(null);
     desks = [];
-    img.src = PLACEHOLDER_MAP;
-    // Create the initial empty record so future upserts work cleanly
-    await sbSaveMapAndDesks(null, []);
   }
 
   renderDesks();
@@ -1342,14 +1375,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   const df = document.getElementById('map-date-filter');
   if (df) df.value = today;
 
-  // init supabase if configured
-  const cfg = getSupabaseConfig();
-  if (cfg.url && cfg.key) {
-    initSupabase(cfg.url, cfg.key);
-  }
-
-  await loadSharedState();
   setMode('book');
+  await loadAppState();
 });
 
 document.getElementById('booking-modal').addEventListener('click', function(e) { if (e.target === this) closeModal(); });
