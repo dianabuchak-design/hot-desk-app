@@ -512,7 +512,7 @@
           <button class="toolbar-btn" onclick="saveSupabaseConfig()">Save &amp; Connect</button>
         </div>
         <div id="sb-setup-hint" style="margin-top:12px;font-size:12px;color:#7a909e;line-height:1.6;">
-          <strong>Setup required:</strong> Create a table called <code>app_state</code> in your Supabase project with columns: <code>key</code> (text, primary key), <code>value</code> (text). Enable Row Level Security and add a policy allowing all operations for anon role.
+          <strong>Setup required:</strong> Create a table called <code>app_state</code> in your Supabase project with columns: <code>id</code> (int8, primary key), <code>key</code> (text), <code>map</code> (text), <code>desks</code> (jsonb). Enable Row Level Security and add a policy allowing all operations for the anon role. The app will always use the single row where <code>id = 1</code>.
         </div>
       </div>
       <div class="settings-section">
@@ -669,6 +669,8 @@
 // ========== CONSTANTS ==========
 const ADMIN_PASSWORD = 'GENESIS2026TECH!1';
 const PLACEHOLDER_MAP = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="920"><rect width="1160" height="920" fill="#b8cfc4"/><text x="580" y="450" text-anchor="middle" font-family="sans-serif" font-size="24" fill="#6a8c7e">No map uploaded.</text><text x="580" y="490" text-anchor="middle" font-family="sans-serif" font-size="16" fill="#6a8c7e">Go to Settings (Admin) to upload the office map.</text></svg>');
+const APP_STATE_ID = 1;
+const APP_STATE_KEY = 'main';
 
 // ========== SUPABASE ==========
 let _supabase = null;
@@ -686,6 +688,7 @@ function initSupabase(url, key) {
     _supabase = supabase.createClient(url, key);
     return true;
   } catch(e) {
+    console.error('Supabase init error:', e);
     _supabase = null;
     return false;
   }
@@ -709,7 +712,7 @@ function saveSupabaseConfig() {
 async function testSupabaseConnection() {
   if (!_supabase) { updateSbStatus('Not connected.', '#ef4444'); return; }
   try {
-    const { error } = await _supabase.from('app_state').select('key').limit(1);
+    const { error } = await _supabase.from('app_state').select('id').eq('id', APP_STATE_ID).limit(1);
     if (error) {
       updateSbStatus('Error: ' + error.message, '#ef4444');
     } else {
@@ -725,40 +728,58 @@ function updateSbStatus(msg, color) {
   if (el) { el.textContent = msg; el.style.color = color || '#7a909e'; }
 }
 
-// ========== SHARED STATE: SUPABASE + localStorage FALLBACK ==========
-async function sharedGet(key) {
-  if (_supabase) {
-    try {
-      const { data, error } = await _supabase.from('app_state').select('value').eq('key', key).maybeSingle();
-      if (!error && data) return data.value;
-    } catch(e) {}
-  }
-  return localStorage.getItem('hd_' + key);
-}
-
-async function sharedSet(key, value) {
-  localStorage.setItem('hd_' + key, value);
-  if (_supabase) {
-    try {
-      await _supabase.from('app_state').upsert({ key, value }, { onConflict: 'key' });
-    } catch(e) {}
+// ========== SUPABASE APP STATE: single row id=1, key='main' ==========
+async function sbLoadState() {
+  if (!_supabase) return null;
+  try {
+    const { data, error } = await _supabase
+      .from('app_state')
+      .select('map, desks')
+      .eq('id', APP_STATE_ID)
+      .eq('key', APP_STATE_KEY)
+      .maybeSingle();
+    if (error) { console.error('sbLoadState error:', error); return null; }
+    return data; // { map, desks } or null
+  } catch(e) {
+    console.error('sbLoadState exception:', e);
+    return null;
   }
 }
 
-async function sharedDelete(key) {
-  localStorage.removeItem('hd_' + key);
-  if (_supabase) {
-    try {
-      await _supabase.from('app_state').delete().eq('key', key);
-    } catch(e) {}
+async function sbSaveMapAndDesks(mapVal, desksVal) {
+  if (!_supabase) return;
+  try {
+    const { error } = await _supabase
+      .from('app_state')
+      .upsert({ id: APP_STATE_ID, key: APP_STATE_KEY, map: mapVal, desks: desksVal }, { onConflict: 'id' });
+    if (error) console.error('sbSaveMapAndDesks error:', error);
+  } catch(e) {
+    console.error('sbSaveMapAndDesks exception:', e);
   }
+}
+
+async function sbClearMapAndDesks() {
+  if (!_supabase) return;
+  try {
+    const { error } = await _supabase
+      .from('app_state')
+      .upsert({ id: APP_STATE_ID, key: APP_STATE_KEY, map: null, desks: [] }, { onConflict: 'id' });
+    if (error) console.error('sbClearMapAndDesks error:', error);
+  } catch(e) {
+    console.error('sbClearMapAndDesks exception:', e);
+  }
+}
+
+// bookings remain in localStorage (not in this table)
+function saveBookings() {
+  localStorage.setItem('hd_bookings', JSON.stringify(bookings));
 }
 
 // ========== STATE ==========
 let mode = 'book';
 let selectedDeskId = null;
 let desks = [];
-let bookings = [];
+let bookings = JSON.parse(localStorage.getItem('hd_bookings') || '[]');
 let mapImageSrc = '';
 let adminUnlocked = false;
 let pendingNavPage = null;
@@ -780,23 +801,34 @@ drawLogo();
 
 // ========== LOAD ON INIT ==========
 async function loadSharedState() {
-  const [mapVal, desksVal, bookingsVal] = await Promise.all([
-    sharedGet('map_img'),
-    sharedGet('desks'),
-    sharedGet('bookings')
-  ]);
+  const img = document.getElementById('office-map');
 
-  if (mapVal) {
-    mapImageSrc = mapVal;
-    const img = document.getElementById('office-map');
-    img.src = mapImageSrc;
-    await new Promise(res => { img.onload = res; img.onerror = res; });
+  const row = await sbLoadState();
+
+  if (row) {
+    // Load map
+    if (row.map) {
+      mapImageSrc = row.map;
+      img.src = mapImageSrc;
+      await new Promise(res => { img.onload = res; img.onerror = res; });
+    } else {
+      mapImageSrc = '';
+      img.src = PLACEHOLDER_MAP;
+    }
+    // Load desks — desks column is jsonb, may already be parsed
+    if (row.desks) {
+      desks = Array.isArray(row.desks) ? row.desks : JSON.parse(row.desks);
+    } else {
+      desks = [];
+    }
   } else {
-    document.getElementById('office-map').src = PLACEHOLDER_MAP;
+    // No record yet — show placeholder, empty desks
+    mapImageSrc = '';
+    desks = [];
+    img.src = PLACEHOLDER_MAP;
+    // Create the initial empty record so future upserts work cleanly
+    await sbSaveMapAndDesks(null, []);
   }
-
-  desks = desksVal ? JSON.parse(desksVal) : [];
-  bookings = bookingsVal ? JSON.parse(bookingsVal) : [];
 
   renderDesks();
   renderWeekDays();
@@ -859,7 +891,7 @@ async function submitCancelPwd() {
     document.getElementById('cancel-pwd-modal').classList.remove('open');
     const id = pendingCancelId; pendingCancelId = null;
     bookings = bookings.filter(b => b.id !== id);
-    await saveBookings();
+    saveBookings();
     closeModal();
     renderDesks();
     renderAllReservations();
@@ -938,20 +970,16 @@ function renderUpcoming() {
 }
 
 // ========== MAP UPLOAD ==========
-async function setMapImage(src) {
-  mapImageSrc = src;
-  document.getElementById('office-map').src = src;
-  await sharedSet('map_img', src);
-}
-
 function handleMapUpload(e) {
   const file = e.target.files[0];
   if (!file) return;
   const reader = new FileReader();
   reader.onload = async (ev) => {
-    await setMapImage(ev.target.result);
+    mapImageSrc = ev.target.result;
+    const img = document.getElementById('office-map');
+    img.src = mapImageSrc;
     const s = document.getElementById('map-status');
-    if (s) s.textContent = '✓ Map uploaded: ' + file.name;
+    if (s) s.textContent = '✓ Map uploaded: ' + file.name + ' — click Save Map to persist.';
     setTimeout(renderDesks, 200);
   };
   reader.readAsDataURL(file);
@@ -979,15 +1007,16 @@ function renderSettingsPage() {
 
 // ========== MAP & DESK SAVE/DELETE ==========
 async function saveMap() {
-  await sharedSet('map_img', mapImageSrc);
-  await sharedSet('desks', JSON.stringify(desks));
+  // Desks stored as plain objects {id, x, y, label}
+  await sbSaveMapAndDesks(mapImageSrc || null, desks);
   showMapStatus('✓ Map and desks saved.');
 }
 
 async function deleteMap() {
   if (!confirm('Delete the saved map image? This cannot be undone.')) return;
   mapImageSrc = '';
-  await sharedDelete('map_img');
+  desks = [];
+  await sbClearMapAndDesks();
   document.getElementById('office-map').src = PLACEHOLDER_MAP;
   renderDesks();
   renderSettingsPage();
@@ -995,14 +1024,14 @@ async function deleteMap() {
 }
 
 async function saveDesks() {
-  await sharedSet('desks', JSON.stringify(desks));
+  await sbSaveMapAndDesks(mapImageSrc || null, desks);
   showMapStatus('✓ Desks saved (' + desks.length + ' desks).');
 }
 
 async function deleteDesks() {
   if (!confirm('Delete ALL hot desks from the map?')) return;
   desks = [];
-  await sharedSet('desks', JSON.stringify(desks));
+  await sbSaveMapAndDesks(mapImageSrc || null, desks);
   renderDesks();
   renderSettingsPage();
   showMapStatus('All desks deleted.', '#ef4444');
@@ -1025,15 +1054,15 @@ function goToEditMode() {
 async function deleteAllDesks() {
   if (!confirm('Delete ALL desks from the map?')) return;
   desks = [];
-  await sharedSet('desks', JSON.stringify(desks));
+  await sbSaveMapAndDesks(mapImageSrc || null, desks);
   renderDesks();
   renderSettingsPage();
 }
 
-async function clearAllBookings() {
+function clearAllBookings() {
   if (!confirm('Delete ALL bookings? This cannot be undone.')) return;
   bookings = [];
-  await saveBookings();
+  saveBookings();
   renderWeekDays();
   renderUpcoming();
 }
@@ -1168,7 +1197,7 @@ async function submitBooking() {
   }
 
   bookings.push({ id: Date.now(), deskId: selectedDeskId, firstName: first, lastName: last, email, project, date });
-  await saveBookings();
+  saveBookings();
   okEl.textContent = '✓ Desk booked successfully!'; okEl.style.display = 'block';
   setTimeout(() => { closeModal(); renderDesks(); renderWeekDays(); renderUpcoming(); }, 1000);
 }
@@ -1301,10 +1330,10 @@ function exportBookings() {
 
 // ========== PERSIST ==========
 async function _persistDesks() {
-  await sharedSet('desks', JSON.stringify(desks));
+  await sbSaveMapAndDesks(mapImageSrc || null, desks);
 }
-async function saveBookings() {
-  await sharedSet('bookings', JSON.stringify(bookings));
+function saveBookings() {
+  localStorage.setItem('hd_bookings', JSON.stringify(bookings));
 }
 
 // ========== INIT ==========
