@@ -694,12 +694,6 @@ function initSupabase(url, key) {
   }
 }
 
-// Initialize immediately at script parse time — before DOMContentLoaded — so _supabase is ready
-(function earlyInitSupabase() {
-  const cfg = getSupabaseConfig();
-  if (cfg.url && cfg.key) initSupabase(cfg.url, cfg.key);
-})();
-
 function saveSupabaseConfig() {
   const url = document.getElementById('sb-url-input').value.trim();
   const key = document.getElementById('sb-key-input').value.trim();
@@ -821,8 +815,9 @@ function renderMap(mapSrc) {
 // ========== LOAD ON INIT ==========
 async function loadAppState() {
   if (!_supabase) {
-    // No Supabase configured — show placeholder
-    document.getElementById('office-map').src = PLACEHOLDER_MAP;
+    console.warn('loadAppState: Supabase not configured — showing empty state.');
+    renderMap(null);
+    desks = [];
     renderDesks();
     renderWeekDays();
     renderUpcoming();
@@ -832,21 +827,15 @@ async function loadAppState() {
   try {
     const { data, error } = await _supabase
       .from('app_state')
-      .select('*')
+      .select('map, desks')
       .eq('id', APP_STATE_ID)
       .eq('key', APP_STATE_KEY)
-      .single();
+      .maybeSingle();
 
     if (error) {
-      // PGRST116 = no rows found — treat as empty state
-      if (error.code === 'PGRST116') {
-        renderMap(null);
-        desks = [];
-      } else {
-        console.error('loadAppState error:', error);
-        renderMap(null);
-        desks = [];
-      }
+      console.error('loadAppState error:', error);
+      renderMap(null);
+      desks = [];
     } else if (data) {
       renderMap(data.map || null);
       const rawDesks = data.desks;
@@ -854,10 +843,11 @@ async function loadAppState() {
         ? (Array.isArray(rawDesks) ? rawDesks : JSON.parse(rawDesks))
         : [];
     } else {
+      // No row exists yet — empty state
       renderMap(null);
       desks = [];
     }
-  } catch(e) {
+  } catch (e) {
     console.error('loadAppState exception:', e);
     renderMap(null);
     desks = [];
@@ -1040,16 +1030,24 @@ function renderSettingsPage() {
 
 // ========== MAP & DESK SAVE/DELETE ==========
 async function saveMap() {
-  // Desks stored as plain objects {id, x, y, label}
-  await sbSaveMapAndDesks(mapImageSrc || null, desks);
-  showMapStatus('✓ Map and desks saved.');
+  try {
+    await sbSaveMapAndDesks(mapImageSrc || null, desks);
+    showMapStatus('✓ Map and desks saved.');
+  } catch(e) {
+    console.error('saveMap error:', e);
+    showMapStatus('Save failed — check console.', '#ef4444');
+  }
 }
 
 async function deleteMap() {
   if (!confirm('Delete the saved map image? This cannot be undone.')) return;
   mapImageSrc = '';
   desks = [];
-  await sbClearMapAndDesks();
+  try {
+    await sbClearMapAndDesks();
+  } catch(e) {
+    console.error('deleteMap error:', e);
+  }
   document.getElementById('office-map').src = PLACEHOLDER_MAP;
   renderDesks();
   renderSettingsPage();
@@ -1057,14 +1055,23 @@ async function deleteMap() {
 }
 
 async function saveDesks() {
-  await sbSaveMapAndDesks(mapImageSrc || null, desks);
-  showMapStatus('✓ Desks saved (' + desks.length + ' desks).');
+  try {
+    await sbSaveMapAndDesks(mapImageSrc || null, desks);
+    showMapStatus('✓ Desks saved (' + desks.length + ' desks).');
+  } catch(e) {
+    console.error('saveDesks error:', e);
+    showMapStatus('Save failed — check console.', '#ef4444');
+  }
 }
 
 async function deleteDesks() {
   if (!confirm('Delete ALL hot desks from the map?')) return;
   desks = [];
-  await sbSaveMapAndDesks(mapImageSrc || null, desks);
+  try {
+    await sbSaveMapAndDesks(mapImageSrc || null, desks);
+  } catch(e) {
+    console.error('deleteDesks error:', e);
+  }
   renderDesks();
   renderSettingsPage();
   showMapStatus('All desks deleted.', '#ef4444');
@@ -1375,13 +1382,21 @@ document.addEventListener('DOMContentLoaded', async () => {
   const df = document.getElementById('map-date-filter');
   if (df) df.value = today;
 
-  setMode('book');
-  await loadAppState();
-});
+  // Init Supabase here — CDN global is guaranteed loaded by DOMContentLoaded
+  const cfg = getSupabaseConfig();
+  if (cfg.url && cfg.key) {
+    initSupabase(cfg.url, cfg.key);
+  }
 
-document.getElementById('booking-modal').addEventListener('click', function(e) { if (e.target === this) closeModal(); });
-document.getElementById('pwd-modal').addEventListener('click', function(e) { if (e.target === this) closePwdModal(); });
-document.getElementById('cancel-pwd-modal').addEventListener('click', function(e) { if (e.target === this) closeCancelPwdModal(); });
+  setMode('book');
+
+  // Always call loadAppState — will show empty state gracefully if not configured
+  await loadAppState();
+
+  document.getElementById('booking-modal').addEventListener('click', function(e) { if (e.target === this) closeModal(); });
+  document.getElementById('pwd-modal').addEventListener('click', function(e) { if (e.target === this) closePwdModal(); });
+  document.getElementById('cancel-pwd-modal').addEventListener('click', function(e) { if (e.target === this) closeCancelPwdModal(); });
+});
 </script>
 </body>
 </html>
