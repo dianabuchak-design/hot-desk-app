@@ -914,7 +914,7 @@ async function submitCancelPwd() {
     document.getElementById('cancel-pwd-modal').classList.remove('open');
     const id = pendingCancelId; pendingCancelId = null;
     bookings = bookings.filter(b => b.id !== id);
-    saveBookings();
+    await saveBookings();
     closeModal();
     renderDesks();
     renderAllReservations();
@@ -1099,10 +1099,10 @@ async function deleteAllDesks() {
   renderSettingsPage();
 }
 
-function clearAllBookings() {
+async function clearAllBookings() {
   if (!confirm('Delete ALL bookings? This cannot be undone.')) return;
   bookings = [];
-  saveBookings();
+  await saveBookings();
   renderWeekDays();
   renderUpcoming();
 }
@@ -1237,7 +1237,7 @@ async function submitBooking() {
   }
 
   bookings.push({ id: Date.now(), deskId: selectedDeskId, firstName: first, lastName: last, email, project, date });
-  saveBookings();
+  await saveBookings();
   okEl.textContent = '✓ Desk booked successfully!'; okEl.style.display = 'block';
   setTimeout(() => { closeModal(); renderDesks(); renderWeekDays(); renderUpcoming(); }, 1000);
 }
@@ -1372,8 +1372,37 @@ function exportBookings() {
 async function _persistDesks() {
   await sbSaveMapAndDesks(mapImageSrc || null, desks);
 }
-function saveBookings() {
-  localStorage.setItem('hd_bookings', JSON.stringify(bookings));
+async function saveBookings() {
+  if (!_supabase) return;
+
+  const { error: deleteError } = await _supabase
+    .from('bookings')
+    .delete()
+    .neq('id', 0);
+
+  if (deleteError) {
+    console.error(deleteError);
+    return;
+  }
+
+  if (bookings.length > 0) {
+    const { error: insertError } = await _supabase
+      .from('bookings')
+      .insert(
+        bookings.map(b => ({
+          desk_id: b.deskId,
+          first_name: b.firstName,
+          last_name: b.lastName,
+          email: b.email,
+          project: b.project,
+          date: b.date
+        }))
+      );
+
+    if (insertError) {
+      console.error(insertError);
+    }
+  }
 }
 
 // ========== INIT ==========
