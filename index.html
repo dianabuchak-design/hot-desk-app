@@ -707,20 +707,32 @@ function renderMap(mapSrc) {
 async function sbSaveMapAndDesks(mapVal, desksVal) {
   const { error } = await _supabase
     .from('app_state')
-    .upsert(
-      { id: APP_STATE_ID, key: APP_STATE_KEY, map: mapVal, desks: desksVal },
-      { onConflict: 'id' }
-    );
+    .update({ map: mapVal, desks: desksVal })
+    .eq('id', APP_STATE_ID);
   if (error) console.error('sbSaveMapAndDesks error', error);
+}
+
+async function sbSaveMap(mapVal) {
+  const { error } = await _supabase
+    .from('app_state')
+    .update({ map: mapVal })
+    .eq('id', APP_STATE_ID);
+  if (error) console.error('sbSaveMap error', error);
+}
+
+async function sbSaveDesks(desksVal) {
+  const { error } = await _supabase
+    .from('app_state')
+    .update({ desks: desksVal })
+    .eq('id', APP_STATE_ID);
+  if (error) console.error('sbSaveDesks error', error);
 }
 
 async function sbClearMapAndDesks() {
   const { error } = await _supabase
     .from('app_state')
-    .upsert(
-      { id: APP_STATE_ID, key: APP_STATE_KEY, map: null, desks: [] },
-      { onConflict: 'id' }
-    );
+    .update({ map: null, desks: [] })
+    .eq('id', APP_STATE_ID);
   if (error) console.error('sbClearMapAndDesks error', error);
 }
 
@@ -778,7 +790,7 @@ async function saveBookings() {
 async function loadAppState() {
   const { data, error } = await _supabase
     .from('app_state')
-    .select('id, key, map, desks')
+    .select('*')
     .eq('id', APP_STATE_ID)
     .single();
 
@@ -938,13 +950,14 @@ function handleMapUpload(e) {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = async (ev) => {
-    mapImageSrc = ev.target.result;
-    document.getElementById('office-map').src = mapImageSrc;
+    const base64 = ev.target.result;
+    mapImageSrc = base64;
+    document.getElementById('office-map').src = base64;
     const s = document.getElementById('map-status');
     if (s) s.textContent = '⏳ Saving map…';
-    await sbSaveMapAndDesks(mapImageSrc, desks);
-    if (s) s.textContent = '✓ Map uploaded and saved: ' + file.name;
-    console.log('Map uploaded and saved to Supabase.');
+    await sbSaveMap(base64);
+    if (s) s.textContent = '✓ Map saved: ' + file.name;
+    console.log('Map saved to Supabase app_state.map');
     renderDesks();
   };
   reader.readAsDataURL(file);
@@ -978,7 +991,7 @@ async function deleteMap() {
 }
 
 async function saveDesks() {
-  await sbSaveMapAndDesks(mapImageSrc || null, desks);
+  await sbSaveDesks(desks);
   showMapStatus('✓ Desks saved (' + desks.length + ' desks).');
   console.log('Desks saved to Supabase:', desks.length);
 }
@@ -986,7 +999,7 @@ async function saveDesks() {
 async function deleteDesks() {
   if (!confirm('Delete ALL hot desks from the map?')) return;
   desks = [];
-  await sbSaveMapAndDesks(mapImageSrc || null, desks);
+  await sbSaveDesks(desks);
   renderDesks();
   renderSettingsPage();
   showMapStatus('All desks deleted.', '#ef4444');
@@ -1009,7 +1022,7 @@ function goToEditMode() {
 async function deleteAllDesks() {
   if (!confirm('Delete ALL desks from the map?')) return;
   desks = [];
-  await sbSaveMapAndDesks(mapImageSrc || null, desks);
+  await sbSaveDesks(desks);
   renderDesks();
   renderSettingsPage();
 }
@@ -1287,7 +1300,7 @@ function exportBookings() {
 
 // ========== PERSIST DESKS ==========
 async function _persistDesks() {
-  await sbSaveMapAndDesks(mapImageSrc || null, desks);
+  await sbSaveDesks(desks);
   console.log('Desks persisted to Supabase:', desks.length);
 }
 
