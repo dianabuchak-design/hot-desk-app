@@ -492,27 +492,13 @@
         <h3>Supabase Connection</h3>
         <div class="settings-row">
           <div>
-            <div class="settings-label">Supabase URL</div>
-            <div class="settings-desc">Your project URL from Supabase dashboard (Settings → API).</div>
-          </div>
-          <input type="text" id="sb-url-input" placeholder="https://xxxx.supabase.co" style="width:300px;padding:8px 10px;border:1.5px solid #c5d5e0;border-radius:7px;font-size:13px;">
-        </div>
-        <div class="settings-row">
-          <div>
-            <div class="settings-label">Supabase Anon Key</div>
-            <div class="settings-desc">Public anon key from Supabase dashboard (Settings → API).</div>
-          </div>
-          <input type="text" id="sb-key-input" placeholder="eyJhbGci..." style="width:300px;padding:8px 10px;border:1.5px solid #c5d5e0;border-radius:7px;font-size:13px;">
-        </div>
-        <div class="settings-row">
-          <div>
             <div class="settings-label">Connection Status</div>
-            <div class="settings-desc" id="sb-status-desc">Not configured.</div>
+            <div class="settings-desc">Database connection is managed automatically.</div>
           </div>
-          <button class="toolbar-btn" onclick="saveSupabaseConfig()">Save &amp; Connect</button>
-        </div>
-        <div id="sb-setup-hint" style="margin-top:12px;font-size:12px;color:#7a909e;line-height:1.6;">
-          <strong>Setup required:</strong> Create a table called <code>app_state</code> in your Supabase project with columns: <code>id</code> (int8, primary key), <code>key</code> (text), <code>map</code> (text), <code>desks</code> (jsonb). Enable Row Level Security and add a policy allowing all operations for the anon role. The app will always use the single row where <code>id = 1</code>.
+          <span style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:#16a34a;">
+            <span style="width:8px;height:8px;background:#22c55e;border-radius:50%;display:inline-block;"></span>
+            Supabase Connected
+          </span>
         </div>
       </div>
       <div class="settings-section">
@@ -671,116 +657,18 @@ const ADMIN_PASSWORD = 'GENESIS2026TECH!1';
 const PLACEHOLDER_MAP = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="920"><rect width="1160" height="920" fill="#b8cfc4"/><text x="580" y="450" text-anchor="middle" font-family="sans-serif" font-size="24" fill="#6a8c7e">No map uploaded.</text><text x="580" y="490" text-anchor="middle" font-family="sans-serif" font-size="16" fill="#6a8c7e">Go to Settings (Admin) to upload the office map.</text></svg>');
 const APP_STATE_ID = 1;
 const APP_STATE_KEY = 'main';
+const SUPABASE_URL = 'https://qytjecbyqcibgjtzauhq.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_U2yS6z3e_6lpBSpp4hSejw_TrNSdMFoJqDSH6lnAh5_mMuFRdgcNPLfUCpQK7FVbzCGLM';
 
-// ========== SUPABASE ==========
-let _supabase = null;
-
-function getSupabaseConfig() {
-  return {
-    url: localStorage.getItem('sb_url') || '',
-    key: localStorage.getItem('sb_key') || ''
-  };
-}
-
-function initSupabase(url, key) {
-  if (!url || !key) return false;
-  try {
-    _supabase = supabase.createClient(url, key);
-    return true;
-  } catch(e) {
-    console.error('Supabase init error:', e);
-    _supabase = null;
-    return false;
-  }
-}
-
-function saveSupabaseConfig() {
-  const url = document.getElementById('sb-url-input').value.trim();
-  const key = document.getElementById('sb-key-input').value.trim();
-  if (!url || !key) { updateSbStatus('Please enter both URL and key.', '#ef4444'); return; }
-  localStorage.setItem('sb_url', url);
-  localStorage.setItem('sb_key', key);
-  const ok = initSupabase(url, key);
-  if (ok) {
-    updateSbStatus('Connected. Testing...', '#f6a800');
-    testSupabaseConnection();
-    loadAppState();
-  } else {
-    updateSbStatus('Failed to initialize client.', '#ef4444');
-  }
-}
-
-async function testSupabaseConnection() {
-  if (!_supabase) { updateSbStatus('Not connected.', '#ef4444'); return; }
-  try {
-    const { error } = await _supabase.from('app_state').select('id').eq('id', APP_STATE_ID).limit(1);
-    if (error) {
-      updateSbStatus('Error: ' + error.message, '#ef4444');
-    } else {
-      updateSbStatus('✓ Connected and table found.', '#16a34a');
-    }
-  } catch(e) {
-    updateSbStatus('Connection error: ' + e.message, '#ef4444');
-  }
-}
-
-function updateSbStatus(msg, color) {
-  const el = document.getElementById('sb-status-desc');
-  if (el) { el.textContent = msg; el.style.color = color || '#7a909e'; }
-}
-
-// ========== SUPABASE APP STATE: single row id=1, key='main' ==========
-async function sbLoadState() {
-  if (!_supabase) return null;
-  try {
-    const { data, error } = await _supabase
-      .from('app_state')
-      .select('map, desks')
-      .eq('id', APP_STATE_ID)
-      .eq('key', APP_STATE_KEY)
-      .maybeSingle();
-    if (error) { console.error('sbLoadState error:', error); return null; }
-    return data; // { map, desks } or null
-  } catch(e) {
-    console.error('sbLoadState exception:', e);
-    return null;
-  }
-}
-
-async function sbSaveMapAndDesks(mapVal, desksVal) {
-  if (!_supabase) return;
-  try {
-    const { error } = await _supabase
-      .from('app_state')
-      .upsert({ id: APP_STATE_ID, key: APP_STATE_KEY, map: mapVal, desks: desksVal }, { onConflict: 'id' });
-    if (error) console.error('sbSaveMapAndDesks error:', error);
-  } catch(e) {
-    console.error('sbSaveMapAndDesks exception:', e);
-  }
-}
-
-async function sbClearMapAndDesks() {
-  if (!_supabase) return;
-  try {
-    const { error } = await _supabase
-      .from('app_state')
-      .upsert({ id: APP_STATE_ID, key: APP_STATE_KEY, map: null, desks: [] }, { onConflict: 'id' });
-    if (error) console.error('sbClearMapAndDesks error:', error);
-  } catch(e) {
-    console.error('sbClearMapAndDesks exception:', e);
-  }
-}
-
-// bookings remain in localStorage (not in this table)
-function saveBookings() {
-  localStorage.setItem('hd_bookings', JSON.stringify(bookings));
-}
+// ========== SUPABASE CLIENT ==========
+// Initialized at declaration time — CDN script is already parsed since this tag is at end of body
+const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // ========== STATE ==========
 let mode = 'book';
 let selectedDeskId = null;
 let desks = [];
-let bookings = JSON.parse(localStorage.getItem('hd_bookings') || '[]');
+let bookings = [];
 let mapImageSrc = '';
 let adminUnlocked = false;
 let pendingNavPage = null;
@@ -800,6 +688,9 @@ function drawLogo() {
 }
 drawLogo();
 
+// ========== MAP PLACEHOLDER INIT ==========
+document.getElementById('office-map').src = PLACEHOLDER_MAP;
+
 // ========== RENDER MAP ==========
 function renderMap(mapSrc) {
   const img = document.getElementById('office-map');
@@ -812,56 +703,105 @@ function renderMap(mapSrc) {
   }
 }
 
-// ========== LOAD ON INIT ==========
-async function loadAppState() {
-  if (!_supabase) {
-    console.warn('loadAppState: Supabase not configured — showing empty state.');
-    renderMap(null);
-    desks = [];
-    renderDesks();
-    renderWeekDays();
-    renderUpcoming();
+// ========== SUPABASE: APP STATE ==========
+async function sbSaveMapAndDesks(mapVal, desksVal) {
+  const { error } = await _supabase
+    .from('app_state')
+    .upsert(
+      { id: APP_STATE_ID, key: APP_STATE_KEY, map: mapVal, desks: desksVal },
+      { onConflict: 'id' }
+    );
+  if (error) console.error('sbSaveMapAndDesks error', error);
+}
+
+async function sbClearMapAndDesks() {
+  const { error } = await _supabase
+    .from('app_state')
+    .upsert(
+      { id: APP_STATE_ID, key: APP_STATE_KEY, map: null, desks: [] },
+      { onConflict: 'id' }
+    );
+  if (error) console.error('sbClearMapAndDesks error', error);
+}
+
+// ========== SUPABASE: BOOKINGS ==========
+async function loadBookings() {
+  const { data, error } = await _supabase
+    .from('bookings')
+    .select('*');
+
+  if (error) {
+    console.error('loadBookings error', error);
+    bookings = [];
     return;
   }
 
-  try {
-    const { data, error } = await _supabase
-      .from('app_state')
-      .select('map, desks')
-      .eq('id', APP_STATE_ID)
-      .eq('key', APP_STATE_KEY)
-      .maybeSingle();
+  bookings = (data || []).map(b => ({
+    id: b.id,
+    deskId: b.desk_id,
+    firstName: b.first_name,
+    lastName: b.last_name,
+    email: b.email,
+    project: b.project,
+    date: b.date
+  }));
+}
 
-    if (error) {
-      console.error('loadAppState error:', error);
-      renderMap(null);
-      desks = [];
-    } else if (data) {
-      renderMap(data.map || null);
-      const rawDesks = data.desks;
-      desks = rawDesks
-        ? (Array.isArray(rawDesks) ? rawDesks : JSON.parse(rawDesks))
-        : [];
-    } else {
-      // No row exists yet — empty state
-      renderMap(null);
-      desks = [];
-    }
-  } catch (e) {
-    console.error('loadAppState exception:', e);
+async function saveBookings() {
+  const { error: deleteError } = await _supabase
+    .from('bookings')
+    .delete()
+    .neq('id', 0);
+
+  if (deleteError) {
+    console.error('saveBookings delete error', deleteError);
+    return;
+  }
+
+  if (bookings.length > 0) {
+    const rows = bookings.map(b => ({
+      desk_id: b.deskId,
+      first_name: b.firstName,
+      last_name: b.lastName,
+      email: b.email,
+      project: b.project,
+      date: b.date
+    }));
+    const { error: insertError } = await _supabase
+      .from('bookings')
+      .insert(rows);
+    if (insertError) console.error('saveBookings insert error', insertError);
+  }
+}
+
+// ========== LOAD ALL STATE ON INIT ==========
+async function loadAppState() {
+  const { data, error } = await _supabase
+    .from('app_state')
+    .select('id, key, map, desks')
+    .eq('id', APP_STATE_ID)
+    .single();
+
+  if (error) {
+    console.error('loadAppState error', error);
+    renderMap(null);
+    desks = [];
+  } else if (data) {
+    const mapVal = typeof data.map === 'string' ? data.map : null;
+    const rawDesks = data.desks;
+    renderMap(mapVal);
+    desks = Array.isArray(rawDesks) ? rawDesks : (rawDesks ? JSON.parse(rawDesks) : []);
+  } else {
     renderMap(null);
     desks = [];
   }
+
+  await loadBookings();
 
   renderDesks();
   renderWeekDays();
   renderUpcoming();
 }
-
-// ========== MAP INIT ==========
-(function initMapPlaceholder() {
-  document.getElementById('office-map').src = PLACEHOLDER_MAP;
-})();
 
 // ========== PASSWORD LOGIC ==========
 function requireAdmin(page) {
@@ -999,79 +939,54 @@ function handleMapUpload(e) {
   const reader = new FileReader();
   reader.onload = async (ev) => {
     mapImageSrc = ev.target.result;
-    const img = document.getElementById('office-map');
-    img.src = mapImageSrc;
+    document.getElementById('office-map').src = mapImageSrc;
     const s = document.getElementById('map-status');
-    if (s) s.textContent = '✓ Map uploaded: ' + file.name + ' — click Save Map to persist.';
-    setTimeout(renderDesks, 200);
+    if (s) s.textContent = '⏳ Saving map…';
+    await sbSaveMapAndDesks(mapImageSrc, desks);
+    if (s) s.textContent = '✓ Map uploaded and saved: ' + file.name;
+    console.log('Map uploaded and saved to Supabase.');
+    renderDesks();
   };
   reader.readAsDataURL(file);
 }
 
-// ========== SETTINGS ==========
+// ========== SETTINGS PAGE ==========
 function renderSettingsPage() {
   const cnt = document.getElementById('settings-desk-count');
   if (cnt) cnt.textContent = desks.length;
   const s = document.getElementById('map-status');
   if (s) s.textContent = mapImageSrc ? '✓ Map image is loaded.' : 'No map uploaded yet.';
-  const cfg = getSupabaseConfig();
-  const urlEl = document.getElementById('sb-url-input');
-  const keyEl = document.getElementById('sb-key-input');
-  if (urlEl && cfg.url) urlEl.value = cfg.url;
-  if (keyEl && cfg.key) keyEl.value = cfg.key;
-  if (_supabase) {
-    updateSbStatus('✓ Connected.', '#16a34a');
-  } else if (cfg.url && cfg.key) {
-    updateSbStatus('Configured but not yet connected.', '#f6a800');
-  } else {
-    updateSbStatus('Not configured.', '#7a909e');
-  }
 }
 
 // ========== MAP & DESK SAVE/DELETE ==========
 async function saveMap() {
-  try {
-    await sbSaveMapAndDesks(mapImageSrc || null, desks);
-    showMapStatus('✓ Map and desks saved.');
-  } catch(e) {
-    console.error('saveMap error:', e);
-    showMapStatus('Save failed — check console.', '#ef4444');
-  }
+  await sbSaveMapAndDesks(mapImageSrc || null, desks);
+  showMapStatus('✓ Map and desks saved.');
+  console.log('Map and desks saved to Supabase.');
 }
 
 async function deleteMap() {
   if (!confirm('Delete the saved map image? This cannot be undone.')) return;
   mapImageSrc = '';
   desks = [];
-  try {
-    await sbClearMapAndDesks();
-  } catch(e) {
-    console.error('deleteMap error:', e);
-  }
+  await sbClearMapAndDesks();
   document.getElementById('office-map').src = PLACEHOLDER_MAP;
   renderDesks();
   renderSettingsPage();
   showMapStatus('Map deleted.', '#ef4444');
+  console.log('Map and desks cleared from Supabase.');
 }
 
 async function saveDesks() {
-  try {
-    await sbSaveMapAndDesks(mapImageSrc || null, desks);
-    showMapStatus('✓ Desks saved (' + desks.length + ' desks).');
-  } catch(e) {
-    console.error('saveDesks error:', e);
-    showMapStatus('Save failed — check console.', '#ef4444');
-  }
+  await sbSaveMapAndDesks(mapImageSrc || null, desks);
+  showMapStatus('✓ Desks saved (' + desks.length + ' desks).');
+  console.log('Desks saved to Supabase:', desks.length);
 }
 
 async function deleteDesks() {
   if (!confirm('Delete ALL hot desks from the map?')) return;
   desks = [];
-  try {
-    await sbSaveMapAndDesks(mapImageSrc || null, desks);
-  } catch(e) {
-    console.error('deleteDesks error:', e);
-  }
+  await sbSaveMapAndDesks(mapImageSrc || null, desks);
   renderDesks();
   renderSettingsPage();
   showMapStatus('All desks deleted.', '#ef4444');
@@ -1135,7 +1050,8 @@ function handleMapClick(e) {
   const x = ((e.clientX - rect.left) / img.offsetWidth) * 100;
   const y = ((e.clientY - rect.top) / img.offsetHeight) * 100;
   desks.push({ id: Date.now(), x, y, label: 'Desk ' + (desks.length + 1) });
-  _persistDesks(); renderDesks();
+  _persistDesks();
+  renderDesks();
 }
 
 // ========== RENDER DESKS ==========
@@ -1163,12 +1079,13 @@ function renderDesks() {
     if (mode === 'edit') {
       const del = document.createElement('button');
       del.className = 'del-btn'; del.innerHTML = '✕';
-      del.onclick = (e) => { e.stopPropagation(); desks = desks.filter(d => d.id !== desk.id); _persistDesks(); renderDesks(); };
+      del.onclick = (ev) => { ev.stopPropagation(); desks = desks.filter(d => d.id !== desk.id); _persistDesks(); renderDesks(); };
       dot.appendChild(del);
     } else {
-      dot.onclick = (e) => { e.stopPropagation(); openBookingModal(desk); };
+      dot.onclick = (ev) => { ev.stopPropagation(); openBookingModal(desk); };
     }
-    mc.appendChild(dot); mc.appendChild(tt);
+    mc.appendChild(dot);
+    mc.appendChild(tt);
   });
   const lbl = document.getElementById('desk-count-label');
   if (lbl) lbl.textContent = desks.length + ' desks total';
@@ -1368,41 +1285,10 @@ function exportBookings() {
   XLSX.writeFile(wb, 'hot-desk-bookings.xlsx');
 }
 
-// ========== PERSIST ==========
+// ========== PERSIST DESKS ==========
 async function _persistDesks() {
   await sbSaveMapAndDesks(mapImageSrc || null, desks);
-}
-async function saveBookings() {
-  if (!_supabase) return;
-
-  const { error: deleteError } = await _supabase
-    .from('bookings')
-    .delete()
-    .neq('id', 0);
-
-  if (deleteError) {
-    console.error(deleteError);
-    return;
-  }
-
-  if (bookings.length > 0) {
-    const { error: insertError } = await _supabase
-      .from('bookings')
-      .insert(
-        bookings.map(b => ({
-          desk_id: b.deskId,
-          first_name: b.firstName,
-          last_name: b.lastName,
-          email: b.email,
-          project: b.project,
-          date: b.date
-        }))
-      );
-
-    if (insertError) {
-      console.error(insertError);
-    }
-  }
+  console.log('Desks persisted to Supabase:', desks.length);
 }
 
 // ========== INIT ==========
@@ -1411,21 +1297,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   const df = document.getElementById('map-date-filter');
   if (df) df.value = today;
 
-  // Init Supabase here — CDN global is guaranteed loaded by DOMContentLoaded
-  const cfg = getSupabaseConfig();
-  if (cfg.url && cfg.key) {
-    initSupabase(cfg.url, cfg.key);
-  }
-
   setMode('book');
-
-  // Always call loadAppState — will show empty state gracefully if not configured
   await loadAppState();
 
   document.getElementById('booking-modal').addEventListener('click', function(e) { if (e.target === this) closeModal(); });
   document.getElementById('pwd-modal').addEventListener('click', function(e) { if (e.target === this) closePwdModal(); });
   document.getElementById('cancel-pwd-modal').addEventListener('click', function(e) { if (e.target === this) closeCancelPwdModal(); });
 });
+
 </script>
 </body>
 </html>
