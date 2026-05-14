@@ -695,12 +695,33 @@ document.getElementById('office-map').src = PLACEHOLDER_MAP;
 // ========== SUPABASE: PERSIST MAP ==========
 // Saves only the map column. Desks are untouched.
 async function sbSaveMap(base64) {
-  const { error } = await _supabase
+  console.log('SAVING MAP...');
+  console.log('APP_STATE_ID:', APP_STATE_ID);
+  console.log('MAP EXISTS:', !!base64);
+
+  const { data, error } = await _supabase
     .from('app_state')
     .update({ map: base64 })
-    .eq('id', APP_STATE_ID);
-  if (error) console.error('sbSaveMap error', error);
-  else console.log('Map saved to Supabase.');
+    .eq('id', APP_STATE_ID)
+    .select();
+
+  console.log('SUPABASE RESPONSE DATA:', data);
+  console.log('SUPABASE RESPONSE ERROR:', error);
+
+  if (error) {
+    console.error('sbSaveMap error', error);
+    alert('SAVE FAILED: ' + JSON.stringify(error));
+    return false;
+  }
+
+  if (!data || data.length === 0) {
+    console.error('NO ROW UPDATED');
+    alert('NO ROW UPDATED IN SUPABASE');
+    return false;
+  }
+
+  console.log('MAP SAVED SUCCESSFULLY');
+  return true;
 }
 
 // ========== SUPABASE: PERSIST DESKS ==========
