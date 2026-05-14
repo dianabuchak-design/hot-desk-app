@@ -388,23 +388,6 @@
         <span id="desk-count-label" style="font-size:12px;color:#7a909e;"></span>
       </div>
       <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-top:1px solid #e8eef2;padding-top:14px;">
-        <button class="toolbar-btn active" onclick="saveMap()" style="background:#2a9d8f;color:#fff;border-color:#2a9d8f;">
-          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-          Save Map
-        </button>
-        <button class="toolbar-btn danger" onclick="deleteMap()">
-          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
-          Delete Map
-        </button>
-        <span style="width:1px;height:24px;background:#e8eef2;display:inline-block;"></span>
-        <button class="toolbar-btn active" onclick="saveDesks()" style="background:#2a9d8f;color:#fff;border-color:#2a9d8f;">
-          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 8 12 12 14 14"/></svg>
-          Save Desks
-        </button>
-        <button class="toolbar-btn danger" onclick="deleteDesks()">
-          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-          Delete Desks
-        </button>
         <span id="map-save-status" style="font-size:12px;color:#16a34a;"></span>
       </div>
     </div>
@@ -506,7 +489,7 @@
         <div class="settings-row">
           <div>
             <div class="settings-label">Upload Office Map Image</div>
-            <div class="settings-desc">Upload the floor plan image used as background on the Office Map page.</div>
+            <div class="settings-desc">Choose a floor plan image. Preview appears on the Office Map page. Click Save Map to persist it.</div>
           </div>
           <label style="cursor:pointer;">
             <span class="toolbar-btn" style="cursor:pointer;">
@@ -516,7 +499,27 @@
             <input type="file" accept="image/*" style="display:none;" onchange="handleMapUpload(event)">
           </label>
         </div>
-        <div id="map-status" style="font-size:12px;color:#7a909e;margin-top:8px;padding-top:4px;"></div>
+        <div class="settings-row">
+          <div>
+            <div class="settings-label">Save Map to Supabase</div>
+            <div class="settings-desc">Persist the currently uploaded map so it survives page refresh.</div>
+          </div>
+          <button class="toolbar-btn active" onclick="saveMap()" style="background:#2a9d8f;color:#fff;border-color:#2a9d8f;">
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+            Save Map
+          </button>
+        </div>
+        <div class="settings-row">
+          <div>
+            <div class="settings-label">Delete Map</div>
+            <div class="settings-desc">Remove the map image from Supabase. Desks are preserved unless you also delete them.</div>
+          </div>
+          <button class="toolbar-btn danger" onclick="deleteMap()">
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+            Delete Map
+          </button>
+        </div>
+        <div id="map-status" style="font-size:12px;color:#7a909e;margin-top:4px;padding-top:2px;"></div>
       </div>
       <div class="settings-section">
         <h3>Hot Desks Management</h3>
@@ -764,9 +767,10 @@ async function handleMapUpload(event) {
     reader.readAsDataURL(file);
   });
 
+  // Preview only — set state and update the map image, do NOT save to Supabase yet.
+  // The user must click Save Map in Settings to persist.
   mapImageSrc = base64;
 
-  // Wait for the image to fully load before rendering desks
   await new Promise((resolve) => {
     const img = document.getElementById('office-map');
 
@@ -793,9 +797,7 @@ async function handleMapUpload(event) {
 
   renderDesks();
 
-  if (s) s.textContent = '⏳ Saving map to Supabase…';
-  await sbSaveMap(base64);
-  if (s) s.textContent = '✓ Map saved: ' + file.name;
+  if (s) s.textContent = '⚠️ Preview loaded: ' + file.name + ' — click Save Map to persist.';
 }
 
 // ========== INITIALIZATION (single entry point) ==========
@@ -997,26 +999,39 @@ function renderSettingsPage() {
   const cnt = document.getElementById('settings-desk-count');
   if (cnt) cnt.textContent = desks.length;
   const s = document.getElementById('map-status');
-  if (s) s.textContent = mapImageSrc ? '✓ Map image is loaded.' : 'No map uploaded yet.';
+  if (s) {
+    if (mapImageSrc) {
+      s.textContent = '✓ Map is saved and active.';
+      s.style.color = '#16a34a';
+    } else {
+      s.textContent = 'No map uploaded yet.';
+      s.style.color = '#7a909e';
+    }
+  }
 }
 
 // ========== MAP & DESK SAVE/DELETE ==========
 async function saveMap() {
-  await sbSaveMap(mapImageSrc || null);
+  if (!mapImageSrc) {
+    showMapStatus('No map to save — upload an image first.', '#ef4444');
+    return;
+  }
+  const s = document.getElementById('map-status');
+  if (s) { s.textContent = '⏳ Saving map…'; s.style.color = '#7a909e'; }
+  await sbSaveMap(mapImageSrc);
+  if (s) { s.textContent = '✓ Map saved and active.'; s.style.color = '#16a34a'; }
   showMapStatus('✓ Map saved.');
 }
 
 async function deleteMap() {
-  if (!confirm('Delete the saved map image? This cannot be undone.')) return;
+  if (!confirm('Delete the saved map image? Desks will be preserved.')) return;
   mapImageSrc = '';
-  desks = [];
-  // Persist map and desks independently — both cleared
+  // Only clear map — desks are NOT touched
   await sbSaveMap(null);
-  await sbSaveDesks();
   document.getElementById('office-map').src = PLACEHOLDER_MAP;
   renderDesks();
   renderSettingsPage();
-  showMapStatus('Map deleted.', '#ef4444');
+  showMapStatus('Map deleted. Desks preserved.', '#ef4444');
 }
 
 async function saveDesks() {
